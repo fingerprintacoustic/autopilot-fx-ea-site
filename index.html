@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoPilot FX EA — Fingerprint Acoustic Trade</title>
+<meta name="description" content="AutoPilot FX EA — a downloadable MQL5 Expert Advisor for MetaTrader 5. ATR-based breakout straddle bot with an adjustable daily loss limit, spread filter, and on-chart dashboard.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b1f3a'/%3E%3Cpath d='M5 20c3 0 3-8 6-8s3 8 6 8 3-11 6-11 3 11 4 11' fill='none' stroke='%234da3ff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0a1626;
+    --bg-2:#0f2036;
+    --panel:#12263f;
+    --panel-2:#16304f;
+    --border:#22405f;
+    --text:#e7eef7;
+    --muted:#9db2c9;
+    --accent:#4da3ff;
+    --accent-strong:#1f7ae0;
+    --warn-bg:#3a2a12;
+    --warn-border:#7a5a20;
+    --warn-text:#ffd99a;
+    --radius:14px;
+    --maxw:960px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:linear-gradient(180deg,var(--bg),var(--bg-2));
+    color:var(--text);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent)}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+  header{
+    border-bottom:1px solid var(--border);
+    background:rgba(10,22,38,.7);
+    backdrop-filter:blur(8px);
+    position:sticky;top:0;z-index:10;
+  }
+  .brand{display:flex;align-items:center;gap:10px;padding:16px 0;font-weight:600;letter-spacing:.2px}
+  .brand svg{flex:none}
+  .brand small{display:block;font-weight:400;color:var(--muted);font-size:12px;letter-spacing:.5px;text-transform:uppercase}
+
+  .hero{padding:64px 0 40px}
+  .tag{
+    display:inline-block;font-size:12px;letter-spacing:1px;text-transform:uppercase;
+    color:var(--accent);border:1px solid var(--border);border-radius:999px;
+    padding:5px 12px;margin-bottom:22px;background:var(--panel)
+  }
+  h1{font-size:clamp(2rem,5vw,3.1rem);line-height:1.1;margin:0 0 18px}
+  .lead{font-size:1.15rem;color:var(--muted);max-width:640px;margin:0 0 28px}
+  .cta{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;
+    background:linear-gradient(180deg,var(--accent),var(--accent-strong));
+    color:#fff;font-weight:600;text-decoration:none;
+    padding:14px 24px;border-radius:12px;border:1px solid #2f8ae8;
+    box-shadow:0 8px 24px -8px rgba(31,122,224,.7);
+  }
+  .btn:hover{filter:brightness(1.07)}
+  .btn.secondary{
+    background:var(--panel);color:var(--text);border:1px solid var(--border);
+    box-shadow:none;font-weight:500;
+  }
+  .meta{color:var(--muted);font-size:.9rem}
+
+  section{padding:44px 0;border-top:1px solid var(--border)}
+  h2{font-size:1.6rem;margin:0 0 6px}
+  .sub{color:var(--muted);margin:0 0 26px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .card{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:20px;
+  }
+  .card h3{margin:0 0 8px;font-size:1.05rem;display:flex;align-items:center;gap:9px}
+  .card p{margin:0;color:var(--muted);font-size:.95rem}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
+
+  ol.steps{counter-reset:step;list-style:none;padding:0;margin:0;display:grid;gap:14px}
+  ol.steps li{
+    background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:16px 18px 16px 56px;position:relative;color:var(--muted)
+  }
+  ol.steps li::before{
+    counter-increment:step;content:counter(step);
+    position:absolute;left:16px;top:14px;
+    width:26px;height:26px;border-radius:50%;
+    background:var(--accent-strong);color:#fff;font-weight:700;font-size:.85rem;
+    display:flex;align-items:center;justify-content:center
+  }
+  ol.steps li strong{color:var(--text)}
+  code{
+    background:var(--bg-2);border:1px solid var(--border);border-radius:6px;
+    padding:2px 6px;font-family:"SF Mono",SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;
+    font-size:.88em
+  }
+
+  table{width:100%;border-collapse:collapse;font-size:.92rem;overflow:hidden;border-radius:12px}
+  .table-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:12px}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--border)}
+  th{background:var(--panel-2);color:var(--text);font-weight:600}
+  td{color:var(--muted)}
+  tr:last-child td{border-bottom:none}
+  td code{color:var(--text)}
+
+  .disclaimer{
+    background:var(--warn-bg);border:1px solid var(--warn-border);border-radius:var(--radius);
+    padding:22px 24px;color:var(--warn-text)
+  }
+  .disclaimer h2{color:var(--warn-text)}
+  .disclaimer ul{margin:0;padding-left:20px}
+  .disclaimer li{margin:6px 0}
+
+  footer{
+    border-top:1px solid var(--border);padding:32px 0 48px;color:var(--muted);font-size:.9rem
+  }
+  footer .brand{padding-bottom:10px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="#0b1f3a"/>
+        <path d="M5 20c3 0 3-8 6-8s3 8 6 8 3-11 6-11 3 11 4 11" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+      <span>Fingerprint Acoustic Trade<small>AutoPilot FX</small></span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <div class="hero">
+      <span class="tag">MQL5 Expert Advisor · MetaTrader 5</span>
+      <h1>AutoPilot FX EA</h1>
+      <p class="lead">
+        An ATR-based <strong>breakout straddle</strong> bot for MetaTrader 5. It brackets price with a
+        Buy Stop and a Sell Stop sized from current volatility, follows whichever way the market breaks,
+        cancels the other side, and re-arms once the trade closes &mdash; with an adjustable daily loss
+        limit and built-in safety warnings.
+      </p>
+      <div class="cta">
+        <a class="btn" href="AutoPilotFX_EA.mq5" download>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+          Download AutoPilotFX_EA.mq5
+        </a>
+        <a class="btn secondary" href="#install">Installation guide</a>
+        <span class="meta">v1.10 &middot; single file &middot; ~19&nbsp;KB</span>
+      </div>
+    </div>
+
+    <section id="how">
+      <h2>What it does</h2>
+      <p class="sub">Stop-and-reverse breakout logic, driven by volatility rather than a fixed distance.</p>
+      <div class="grid">
+        <div class="card">
+          <h3><span class="dot"></span>Volatility-sized straddle</h3>
+          <p>Distance from price for both pending orders is <code>ATR &times; multiplier</code>, so the bracket widens in fast markets and tightens in quiet ones.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot"></span>Breakout direction</h3>
+          <p>Whichever stop order triggers first rides the breakout. Each entry carries a tight, fixed Stop Loss and Take Profit in points.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot"></span>OCO behaviour</h3>
+          <p>When one side fills, the opposite pending order is cancelled automatically. Only one straddle (two pending orders) is ever active &mdash; no grid, no martingale.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot"></span>Auto re-arm &amp; re-center</h3>
+          <p>After a trade closes on SL or TP, a fresh straddle is placed around the new price. If price drifts off without triggering, the straddle re-centers.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <h2>Key features</h2>
+      <p class="sub">Safety and transparency are built in, not bolted on.</p>
+      <div class="grid">
+        <div class="card">
+          <h3><span class="dot"></span>OCO straddle engine</h3>
+          <p>Buy Stop above, Sell Stop below; first fill wins, the other order is pulled.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot"></span>Adjustable daily loss limit</h3>
+          <p>Halts trading for the rest of the day once losses hit a cap &mdash; a percentage of the day-start balance or a fixed amount. Optionally closes any open position when the limit is reached.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot"></span>Spread filter</h3>
+          <p>Skips placing new orders when the spread is wider than your threshold, to avoid entering during news spikes.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot"></span>Input sanity-check warnings</h3>
+          <p>On load, the EA checks your settings against recommended safe ranges and raises an Alert plus a detailed log explanation for anything outside them. It still runs with your values &mdash; the warning is informational.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot"></span>On-chart dashboard</h3>
+          <p>Live status panel showing current state, today's P/L, and whether the daily limit has been hit.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot"></span>Single self-contained file</h3>
+          <p>One <code>.mq5</code>, no dependencies, no DLLs. Compile in MetaEditor and run.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="install">
+      <h2>Installation</h2>
+      <p class="sub">About two minutes in MetaTrader 5.</p>
+      <ol class="steps">
+        <li><a href="AutoPilotFX_EA.mq5" download><strong>Download <code>AutoPilotFX_EA.mq5</code></strong></a> from the button above.</li>
+        <li>In MetaTrader 5, open <strong>File &rarr; Open Data Folder</strong>.</li>
+        <li>Copy the file into <strong><code>MQL5/Experts/</code></strong>.</li>
+        <li>Back in MT5, right-click <strong>Expert Advisors</strong> in the Navigator and choose <strong>Refresh</strong> (or press <strong>F7</strong> in MetaEditor to compile).</li>
+        <li>Drag <strong>AutoPilotFX_EA</strong> onto a chart (tested on EURUSD) and tick <strong>Allow Algo Trading</strong>.</li>
+        <li>Review the <strong>Inputs</strong> tab, adjust to your account and risk, and confirm.</li>
+      </ol>
+    </section>
+
+    <section id="inputs">
+      <h2>Key inputs</h2>
+      <p class="sub">Full list is in the EA's Inputs tab; these are the ones that matter most.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Input</th><th>Default</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>InpATRPeriod</code></td><td>14</td><td>ATR period</td></tr>
+            <tr><td><code>InpATRTimeframe</code></td><td>M15</td><td>Timeframe used for the ATR reading</td></tr>
+            <tr><td><code>InpATRMultiplier</code></td><td>1.0</td><td>Distance from price = ATR &times; this</td></tr>
+            <tr><td><code>InpSLPoints</code></td><td>80</td><td>Stop loss (points)</td></tr>
+            <tr><td><code>InpTPPoints</code></td><td>120</td><td>Take profit (points)</td></tr>
+            <tr><td><code>InpLotSize</code></td><td>0.01</td><td>Lot size</td></tr>
+            <tr><td><code>InpMagicNumber</code></td><td>260826</td><td>Unique EA identifier</td></tr>
+            <tr><td><code>InpMaxSpreadPoints</code></td><td>200</td><td>Max allowed spread (points)</td></tr>
+            <tr><td><code>InpUseDailyLossLimit</code></td><td>true</td><td>Enable / disable the daily cap</td></tr>
+            <tr><td><code>InpLimitIsPercent</code></td><td>true</td><td>% of day-start balance vs fixed amount</td></tr>
+            <tr><td><code>InpDailyLossPercent</code></td><td>3.0</td><td>Recommended max: 5%</td></tr>
+            <tr><td><code>InpDailyLossAmount</code></td><td>20.0</td><td>Used only if <code>InpLimitIsPercent = false</code></td></tr>
+            <tr><td><code>InpCloseOpenOnLimitHit</code></td><td>true</td><td>Close open position when the limit hits</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="disclaimer">
+      <div class="disclaimer">
+        <h2>Disclaimer &mdash; read before use</h2>
+        <ul>
+          <li><strong>Use a demo account first.</strong> Run the EA on a demo account until you understand its behaviour in your market and on your broker's conditions.</li>
+          <li><strong>No guarantee of profit.</strong> Straddle bots whip-saw and lose repeatedly in ranging or choppy markets, and only profit on genuine breakouts. Past or simulated results do not predict future results.</li>
+          <li><strong>The daily loss limit is a safety brake, not a promise.</strong> It caps losses within a single session &mdash; it does not make the strategy profitable.</li>
+          <li><strong>Not financial advice.</strong> This software is provided for educational and informational purposes only. Nothing here is a recommendation to trade any instrument. Trading forex and CFDs carries a high risk of loss and is not suitable for everyone. You are solely responsible for any use of this EA and any resulting losses.</li>
+          <li><strong>No warranty.</strong> The software is provided &ldquo;as is&rdquo;, without warranty of any kind.</li>
+        </ul>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="#0b1f3a"/>
+        <path d="M5 20c3 0 3-8 6-8s3 8 6 8 3-11 6-11 3 11 4 11" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+      <span>Fingerprint Acoustic Trade</span>
+    </div>
+    <p>AutoPilot FX EA v1.10 &middot; MQL5 Expert Advisor for MetaTrader 5.<br>
+    &copy; <span id="yr">2026</span> Fingerprint Acoustic Trade. For educational use. Not financial advice.</p>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('yr').textContent = new Date().getFullYear();
+</script>
+
+</body>
+</html>
