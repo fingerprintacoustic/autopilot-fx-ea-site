@@ -11,24 +11,31 @@
 //| Distance between price and the stop orders is calculated          |
 //| dynamically from ATR, so it widens/narrows with volatility.       |
 //|                                                                    |
-//| SL/TP and straddle distance can be calculated two ways, chosen    |
+//| SL/TP and straddle distance can be calculated three ways, chosen  |
 //| via InpCalcMode:                                                  |
 //|   - Fixed Points: SL/TP in points, distance = ATR * multiplier    |
 //|     (the original behaviour, unchanged).                          |
 //|   - Percentage of Price: SL/TP and distance are each a % of the   |
 //|     current price instead of raw points/ATR.                      |
+//|   - Auto / ATR-Relative: SL, TP, and distance are all multiples   |
+//|     of the instrument's own live ATR, and the spread filter       |
+//|     compares live spread to live ATR too - so nothing is a fixed  |
+//|     number that a given instrument might outgrow. This is the     |
+//|     only mode that re-calibrates itself continuously rather than  |
+//|     using a value chosen once at setup time.                      |
 //|                                                                    |
 //| For anyone who doesn't want to tune the above by hand, InpPreset  |
-//| offers ready-made settings for Forex / Crypto / Metals & Indices  |
-//| - pick one and every detailed setting below is auto-configured.   |
-//| Leave it on Custom to control every value yourself as before.     |
+//| offers ready-made bundles - Auto (default, works on anything),    |
+//| Forex, Crypto, Metals & Indices - pick one and every detailed     |
+//| setting below is configured for you. Leave it on Custom to        |
+//| control every value yourself.                                     |
 //|                                                                    |
 //| Includes an adjustable daily loss limit, and an input-sanity      |
 //| check that warns (Alert + log) with reasoning any time a setting  |
 //| is changed away from the recommended safe range.                  |
 //+------------------------------------------------------------------+
 #property copyright "Fingerprint Acoustic Trade"
-#property version   "1.30"
+#property version   "1.40"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -43,12 +50,14 @@ COrderInfo     orderInfo;
 enum ENUM_CALC_MODE
 {
    CALC_MODE_FIXED_POINTS,  // Fixed Points (SL/TP in points, ATR-based distance)
-   CALC_MODE_PERCENT        // Percentage of Price (SL/TP % of entry, % distance)
+   CALC_MODE_PERCENT,       // Percentage of Price (SL/TP % of entry, % distance)
+   CALC_MODE_ATR_RELATIVE   // Auto / ATR-Relative (SL, TP, and distance are all ATR multiples)
 };
 
 //--- Ready-made setting bundles for people who don't want to tune inputs by hand
 enum ENUM_QUICK_PRESET
 {
+   PRESET_AUTO,          // Auto - Any Instrument (self-calibrates from live ATR & spread, no hand-picked numbers)
    PRESET_CUSTOM,        // Custom - use every detailed setting below
    PRESET_FOREX,         // Forex pairs (e.g. EURUSD, GBPUSD, AUDJPY)
    PRESET_CRYPTO,        // Crypto pairs (e.g. BTCUSD, ETHUSD)
@@ -57,12 +66,12 @@ enum ENUM_QUICK_PRESET
 
 //--- Inputs (all adjustable in MT5 "Inputs" tab)
 input group    "=== Quick Setup (recommended - overrides the detailed settings below unless Custom) ==="
-input ENUM_QUICK_PRESET InpPreset = PRESET_CUSTOM; // What are you trading? (pick one, or Custom to set everything yourself)
+input ENUM_QUICK_PRESET InpPreset = PRESET_AUTO; // What are you trading? (Auto works on anything; pick a specific preset or Custom to set values yourself)
 
 input group    "=== SL / TP / Distance Calculation Mode (ignored unless Quick Setup = Custom) ==="
-input ENUM_CALC_MODE InpCalcMode = CALC_MODE_FIXED_POINTS; // Fixed Points vs Percentage of Price
+input ENUM_CALC_MODE InpCalcMode = CALC_MODE_FIXED_POINTS; // Fixed Points / Percentage of Price / Auto (ATR-Relative)
 
-input group    "=== ATR / Distance Settings (used when Calc Mode = Fixed Points) ==="
+input group    "=== ATR / Distance Settings (used when Calc Mode = Fixed Points or Auto) ==="
 input int      InpATRPeriod        = 14;      // ATR Period
 input ENUM_TIMEFRAMES InpATRTimeframe = PERIOD_M15; // ATR Timeframe
 input double   InpATRMultiplier    = 1.0;     // Distance = ATR * this multiplier
@@ -76,12 +85,17 @@ input double   InpSLPercent        = 0.07;    // Stop Loss (% of entry price)
 input double   InpTPPercent        = 0.11;    // Take Profit (% of entry price)
 input double   InpDistancePercent  = 0.05;    // Straddle distance (% of current price)
 
+input group    "=== SL / TP Settings, as ATR multiples (used when Calc Mode = Auto/ATR-Relative) ==="
+input double   InpSLATRMultiplier      = 0.9;  // Stop Loss = ATR * this
+input double   InpTPATRMultiplier      = 1.5;  // Take Profit = ATR * this
+input double   InpMaxSpreadATRFactor   = 0.25; // Skip placing orders if spread exceeds ATR * this
+
 input group    "=== Trade Settings ==="
 input double   InpLotSize          = 0.01;    // Lot size
 input int      InpMagicNumber      = 260826;  // Magic number (unique EA ID)
 input int      InpSlippage         = 5;       // Max slippage in points
 
-input group    "=== Safety Filter (ignored unless Quick Setup = Custom) ==="
+input group    "=== Safety Filter, points-based (ignored unless Quick Setup = Custom, Calc Mode != Auto) ==="
 input int      InpMaxSpreadPoints  = 200;     // Skip placing orders if spread exceeds this (points)
 
 input group    "=== Straddle Refresh ==="
@@ -118,6 +132,9 @@ int            effSLPoints;
 int            effTPPoints;
 double         effATRMultiplier;
 int            effMaxSpreadPoints;
+double         effSLATRMult;
+double         effTPATRMult;
+double         effMaxSpreadATRFactor;
 
 //+------------------------------------------------------------------+
 //| Resolve the effective settings from InpPreset. Custom passes the  |
@@ -129,6 +146,15 @@ void ApplyPreset()
 {
    switch(InpPreset)
    {
+      case PRESET_AUTO:
+         effCalcMode           = CALC_MODE_ATR_RELATIVE;
+         effATRMultiplier      = 1.0;
+         effSLATRMult          = 0.9;
+         effTPATRMult          = 1.5;
+         effMaxSpreadATRFactor = 0.25;
+         Print("AutoPilotFX_EA: Quick Setup = Auto preset (ATR-relative: distance ATR x1.0, SL ATR x0.9, TP ATR x1.5, max spread = ATR x0.25). Scales itself to this instrument's own live volatility and spread - works on forex, crypto, metals, or indices without needing to pick one. Set InpPreset to Custom to override.");
+         break;
+
       case PRESET_FOREX:
          effCalcMode        = CALC_MODE_FIXED_POINTS;
          effATRMultiplier   = 1.0;
@@ -157,14 +183,17 @@ void ApplyPreset()
          break;
 
       default: // PRESET_CUSTOM
-         effCalcMode        = InpCalcMode;
-         effSLPercent       = InpSLPercent;
-         effTPPercent       = InpTPPercent;
-         effDistancePercent = InpDistancePercent;
-         effSLPoints        = InpSLPoints;
-         effTPPoints        = InpTPPoints;
-         effATRMultiplier   = InpATRMultiplier;
-         effMaxSpreadPoints = InpMaxSpreadPoints;
+         effCalcMode           = InpCalcMode;
+         effSLPercent          = InpSLPercent;
+         effTPPercent          = InpTPPercent;
+         effDistancePercent    = InpDistancePercent;
+         effSLPoints           = InpSLPoints;
+         effTPPoints           = InpTPPoints;
+         effATRMultiplier      = InpATRMultiplier;
+         effMaxSpreadPoints    = InpMaxSpreadPoints;
+         effSLATRMult          = InpSLATRMultiplier;
+         effTPATRMult          = InpTPATRMultiplier;
+         effMaxSpreadATRFactor = InpMaxSpreadATRFactor;
          break;
    }
 }
@@ -196,6 +225,10 @@ void AlertAlgoTradingDisabled()
 #define REC_MAX_SL_PERCENT       1.0     // % of price - above this, a single stop-out costs a lot
 #define REC_MIN_DISTANCE_PERCENT 0.02    // % of price - below this, stop orders sit on top of the noise
 #define REC_MAX_DISTANCE_PERCENT 0.50    // % of price - above this, the bot may rarely get triggered
+#define REC_MIN_SL_ATRMULT       0.3     // ATR multiple - below this, normal noise can stop you out instantly
+#define REC_MAX_SL_ATRMULT       2.0     // ATR multiple - above this, a single stop-out costs a lot
+#define REC_MIN_SPREAD_ATRFACTOR 0.05    // below this, the spread filter blocks almost every trade
+#define REC_MAX_SPREAD_ATRFACTOR 1.0     // above this, spread can eat most of a stop before it even fills
 
 //+------------------------------------------------------------------+
 //| Check every user-adjustable input against its recommended range   |
@@ -228,6 +261,26 @@ void RunInputSanityChecks()
          else if(effDistancePercent > REC_MAX_DISTANCE_PERCENT)
             warnings += StringFormat("- Straddle distance (%.3f%%) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", effDistancePercent);
       }
+      else if(effCalcMode == CALC_MODE_ATR_RELATIVE)
+      {
+         if(effSLATRMult < REC_MIN_SL_ATRMULT)
+            warnings += StringFormat("- Stop Loss (ATR x%.2f) is very tight for %s. Normal spread/slippage could stop you out instantly.\n", effSLATRMult, _Symbol);
+         else if(effSLATRMult > REC_MAX_SL_ATRMULT)
+            warnings += StringFormat("- Stop Loss (ATR x%.2f) is unusually wide. A single stop-out would cost a large share of the position's value.\n", effSLATRMult);
+
+         if(effTPATRMult < effSLATRMult)
+            warnings += StringFormat("- Take Profit (ATR x%.2f) is smaller than Stop Loss (ATR x%.2f). You would need a win rate above 50%% just to break even.\n", effTPATRMult, effSLATRMult);
+
+         if(effATRMultiplier < REC_MIN_ATR_MULT)
+            warnings += StringFormat("- Distance ATR multiplier (%.2f) is low: stop orders sit very close to price and may trigger on normal noise, not real breakouts.\n", effATRMultiplier);
+         else if(effATRMultiplier > REC_MAX_ATR_MULT)
+            warnings += StringFormat("- Distance ATR multiplier (%.2f) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", effATRMultiplier);
+
+         if(effMaxSpreadATRFactor < REC_MIN_SPREAD_ATRFACTOR)
+            warnings += StringFormat("- Max spread filter (ATR x%.2f) is very tight: it may block trading almost all the time on an instrument with a naturally wider spread.\n", effMaxSpreadATRFactor);
+         else if(effMaxSpreadATRFactor > REC_MAX_SPREAD_ATRFACTOR)
+            warnings += StringFormat("- Max spread filter (ATR x%.2f) is loose: spread could eat most of a stop before the trade even fills.\n", effMaxSpreadATRFactor);
+      }
       else
       {
          if(effSLPoints < REC_MIN_SL_POINTS)
@@ -243,8 +296,8 @@ void RunInputSanityChecks()
             warnings += StringFormat("- ATR multiplier (%.2f) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", effATRMultiplier);
       }
 
-      // --- Spread filter ---
-      if(effMaxSpreadPoints > REC_MAX_SPREAD_POINTS)
+      // --- Spread filter (points-based modes only - Auto's spread filter was already checked above) ---
+      if(effCalcMode != CALC_MODE_ATR_RELATIVE && effMaxSpreadPoints > REC_MAX_SPREAD_POINTS)
       {
          if(effCalcMode == CALC_MODE_PERCENT)
             warnings += StringFormat("- Max spread filter (%d pts) is loose. Trades may be allowed during high-spread news spikes, which is dangerous with a tight TP of %.3f%%.\n", effMaxSpreadPoints, effTPPercent);
@@ -301,7 +354,7 @@ int OnInit()
    ApplyPreset();
 
    atrHandle = INVALID_HANDLE;
-   if(effCalcMode == CALC_MODE_FIXED_POINTS)
+   if(effCalcMode != CALC_MODE_PERCENT) // Fixed Points and Auto/ATR-Relative both need ATR
    {
       atrHandle = iATR(_Symbol, InpATRTimeframe, InpATRPeriod);
       if(atrHandle == INVALID_HANDLE)
@@ -488,6 +541,18 @@ void DeleteAllOwnPendingOrders()
 //+------------------------------------------------------------------+
 bool SpreadOK()
 {
+   if(effCalcMode == CALC_MODE_ATR_RELATIVE)
+   {
+      double atr = GetATR();
+      if(atr <= 0)
+         return false; // can't judge the spread against volatility we can't read - stay safe and skip
+
+      double point       = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      long   spreadPoints = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+      double spreadPrice  = spreadPoints * point;
+      return (spreadPrice <= atr * effMaxSpreadATRFactor);
+   }
+
    long spreadPoints = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    return (spreadPoints <= effMaxSpreadPoints);
 }
@@ -525,7 +590,22 @@ void PlaceStraddle()
       sellSL = NormalizeDouble(sellStopPrice * (1.0 + effSLPercent / 100.0), digits);
       sellTP = NormalizeDouble(sellStopPrice * (1.0 - effTPPercent / 100.0), digits);
    }
-   else
+   else if(effCalcMode == CALC_MODE_ATR_RELATIVE)
+   {
+      double atr = GetATR();
+      if(atr <= 0)
+      {
+         Print("Invalid ATR value, skipping straddle placement.");
+         return;
+      }
+      double slDist = atr * effSLATRMult;
+      double tpDist = atr * effTPATRMult;
+      buySL  = NormalizeDouble(buyStopPrice  - slDist, digits);
+      buyTP  = NormalizeDouble(buyStopPrice  + tpDist, digits);
+      sellSL = NormalizeDouble(sellStopPrice + slDist, digits);
+      sellTP = NormalizeDouble(sellStopPrice - tpDist, digits);
+   }
+   else // CALC_MODE_FIXED_POINTS
    {
       buySL  = NormalizeDouble(buyStopPrice  - effSLPoints * point, digits);
       buyTP  = NormalizeDouble(buyStopPrice  + effTPPoints * point, digits);
@@ -564,10 +644,17 @@ void UpdateDashboard()
    double limitAmount = InpLimitIsPercent ? dayStartBalance * (InpDailyLossPercent / 100.0) : InpDailyLossAmount;
 
    string status = dailyLimitHit ? "HALTED - daily loss limit reached" : "Running";
-   string mode   = (effCalcMode == CALC_MODE_PERCENT) ? "Percentage of Price" : "Fixed Points (ATR distance)";
+   string mode;
+   switch(effCalcMode)
+   {
+      case CALC_MODE_PERCENT:      mode = "Percentage of Price";        break;
+      case CALC_MODE_ATR_RELATIVE: mode = "Auto (ATR-relative)";        break;
+      default:                     mode = "Fixed Points (ATR distance)"; break;
+   }
    string preset;
    switch(InpPreset)
    {
+      case PRESET_AUTO:          preset = "Auto";            break;
       case PRESET_FOREX:         preset = "Forex";           break;
       case PRESET_CRYPTO:        preset = "Crypto";          break;
       case PRESET_METALS_INDEX:  preset = "Metals/Index";    break;
