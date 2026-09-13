@@ -18,12 +18,17 @@
 //|   - Percentage of Price: SL/TP and distance are each a % of the   |
 //|     current price instead of raw points/ATR.                      |
 //|                                                                    |
+//| For anyone who doesn't want to tune the above by hand, InpPreset  |
+//| offers ready-made settings for Forex / Crypto / Metals & Indices  |
+//| - pick one and every detailed setting below is auto-configured.   |
+//| Leave it on Custom to control every value yourself as before.     |
+//|                                                                    |
 //| Includes an adjustable daily loss limit, and an input-sanity      |
 //| check that warns (Alert + log) with reasoning any time a setting  |
 //| is changed away from the recommended safe range.                  |
 //+------------------------------------------------------------------+
 #property copyright "Fingerprint Acoustic Trade"
-#property version   "1.21"
+#property version   "1.30"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -41,8 +46,20 @@ enum ENUM_CALC_MODE
    CALC_MODE_PERCENT        // Percentage of Price (SL/TP % of entry, % distance)
 };
 
+//--- Ready-made setting bundles for people who don't want to tune inputs by hand
+enum ENUM_QUICK_PRESET
+{
+   PRESET_CUSTOM,        // Custom - use every detailed setting below
+   PRESET_FOREX,         // Forex pairs (e.g. EURUSD, GBPUSD, AUDJPY)
+   PRESET_CRYPTO,        // Crypto pairs (e.g. BTCUSD, ETHUSD)
+   PRESET_METALS_INDEX   // Metals / Indices (e.g. XAUUSD, US30)
+};
+
 //--- Inputs (all adjustable in MT5 "Inputs" tab)
-input group    "=== SL / TP / Distance Calculation Mode ==="
+input group    "=== Quick Setup (recommended - overrides the detailed settings below unless Custom) ==="
+input ENUM_QUICK_PRESET InpPreset = PRESET_CUSTOM; // What are you trading? (pick one, or Custom to set everything yourself)
+
+input group    "=== SL / TP / Distance Calculation Mode (ignored unless Quick Setup = Custom) ==="
 input ENUM_CALC_MODE InpCalcMode = CALC_MODE_FIXED_POINTS; // Fixed Points vs Percentage of Price
 
 input group    "=== ATR / Distance Settings (used when Calc Mode = Fixed Points) ==="
@@ -64,7 +81,7 @@ input double   InpLotSize          = 0.01;    // Lot size
 input int      InpMagicNumber      = 260826;  // Magic number (unique EA ID)
 input int      InpSlippage         = 5;       // Max slippage in points
 
-input group    "=== Safety Filter ==="
+input group    "=== Safety Filter (ignored unless Quick Setup = Custom) ==="
 input int      InpMaxSpreadPoints  = 200;     // Skip placing orders if spread exceeds this (points)
 
 input group    "=== Straddle Refresh ==="
@@ -87,6 +104,83 @@ ulong    sellStopTicket   = 0;
 double   dayStartBalance  = 0;
 datetime currentDay       = 0;
 bool     dailyLimitHit    = false;
+
+datetime lastAlgoDisabledAlertTime = 0;
+
+//--- Effective settings actually used by the EA: either the raw inputs
+//    (Quick Setup = Custom) or values overridden by the chosen preset.
+//    Populated once in OnInit() by ApplyPreset().
+ENUM_CALC_MODE effCalcMode;
+double         effSLPercent;
+double         effTPPercent;
+double         effDistancePercent;
+int            effSLPoints;
+int            effTPPoints;
+double         effATRMultiplier;
+int            effMaxSpreadPoints;
+
+//+------------------------------------------------------------------+
+//| Resolve the effective settings from InpPreset. Custom passes the  |
+//| detailed inputs through unchanged; any other preset overrides     |
+//| calc mode, SL/TP/distance, and the spread filter with values      |
+//| suited to that instrument class, so nothing needs hand-tuning.    |
+//+------------------------------------------------------------------+
+void ApplyPreset()
+{
+   switch(InpPreset)
+   {
+      case PRESET_FOREX:
+         effCalcMode        = CALC_MODE_FIXED_POINTS;
+         effATRMultiplier   = 1.0;
+         effSLPoints        = 80;
+         effTPPoints        = 120;
+         effMaxSpreadPoints = 200;
+         Print("AutoPilotFX_EA: Quick Setup = Forex preset (Fixed Points, ATR x1.0, SL 80pts, TP 120pts, max spread 200pts). Set InpPreset to Custom to override.");
+         break;
+
+      case PRESET_CRYPTO:
+         effCalcMode        = CALC_MODE_PERCENT;
+         effSLPercent       = 1.5;
+         effTPPercent       = 2.5;
+         effDistancePercent = 1.0;
+         effMaxSpreadPoints = 3000;
+         Print("AutoPilotFX_EA: Quick Setup = Crypto preset (Percentage of Price, SL 1.5%, TP 2.5%, distance 1.0%, max spread 3000pts). Set InpPreset to Custom to override.");
+         break;
+
+      case PRESET_METALS_INDEX:
+         effCalcMode        = CALC_MODE_PERCENT;
+         effSLPercent       = 0.5;
+         effTPPercent       = 0.8;
+         effDistancePercent = 0.3;
+         effMaxSpreadPoints = 500;
+         Print("AutoPilotFX_EA: Quick Setup = Metals/Index preset (Percentage of Price, SL 0.5%, TP 0.8%, distance 0.3%, max spread 500pts). Set InpPreset to Custom to override.");
+         break;
+
+      default: // PRESET_CUSTOM
+         effCalcMode        = InpCalcMode;
+         effSLPercent       = InpSLPercent;
+         effTPPercent       = InpTPPercent;
+         effDistancePercent = InpDistancePercent;
+         effSLPoints        = InpSLPoints;
+         effTPPoints        = InpTPPoints;
+         effATRMultiplier   = InpATRMultiplier;
+         effMaxSpreadPoints = InpMaxSpreadPoints;
+         break;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Alert (throttled to once a minute) that orders are being rejected |
+//| because algo trading is off somewhere - this used to only show up |
+//| as a buried log line, which is easy to miss.                      |
+//+------------------------------------------------------------------+
+void AlertAlgoTradingDisabled()
+{
+   if(TimeCurrent() - lastAlgoDisabledAlertTime < 60)
+      return;
+   lastAlgoDisabledAlertTime = TimeCurrent();
+   Alert("AutoPilotFX_EA: Orders are being rejected because Algo Trading is OFF. Click the 'Algo Trading' button in MT5's top toolbar, AND make sure 'Allow Algo Trading' is ticked in this EA's Common settings tab - both are required.");
+}
 
 //+------------------------------------------------------------------+
 //| Recommended safe ranges - used only for the sanity-check warnings |
@@ -112,44 +206,56 @@ void RunInputSanityChecks()
 {
    string warnings = "";
 
-   // --- SL / TP / distance: checks depend on the active calculation mode ---
-   if(InpCalcMode == CALC_MODE_PERCENT)
+   if(InpPreset != PRESET_CUSTOM)
    {
-      if(InpSLPercent < REC_MIN_SL_PERCENT)
-         warnings += StringFormat("- Stop Loss (%.3f%%) is very tight for %s. Normal spread/slippage could stop you out instantly.\n", InpSLPercent, _Symbol);
-      else if(InpSLPercent > REC_MAX_SL_PERCENT)
-         warnings += StringFormat("- Stop Loss (%.3f%%) is unusually wide. A single stop-out would cost a large share of the position's value.\n", InpSLPercent);
-
-      if(InpTPPercent < InpSLPercent)
-         warnings += StringFormat("- Take Profit (%.3f%%) is smaller than Stop Loss (%.3f%%). You would need a win rate above 50%% just to break even.\n", InpTPPercent, InpSLPercent);
-
-      if(InpDistancePercent < REC_MIN_DISTANCE_PERCENT)
-         warnings += StringFormat("- Straddle distance (%.3f%%) is low: stop orders sit very close to price and may trigger on normal noise, not real breakouts.\n", InpDistancePercent);
-      else if(InpDistancePercent > REC_MAX_DISTANCE_PERCENT)
-         warnings += StringFormat("- Straddle distance (%.3f%%) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", InpDistancePercent);
+      Print("AutoPilotFX_EA: Quick Setup preset is active, so the detailed SL/TP/distance/spread inputs below are ignored - see the preset summary printed above. Set InpPreset to Custom to review those instead.");
    }
    else
    {
-      if(InpSLPoints < REC_MIN_SL_POINTS)
-         warnings += StringFormat("- Stop Loss (%d pts) is very tight for %s. Normal spread/slippage could stop you out instantly.\n", InpSLPoints, _Symbol);
+      // --- SL / TP / distance: checks depend on the active calculation mode ---
+      if(effCalcMode == CALC_MODE_PERCENT)
+      {
+         if(effSLPercent < REC_MIN_SL_PERCENT)
+            warnings += StringFormat("- Stop Loss (%.3f%%) is very tight for %s. Normal spread/slippage could stop you out instantly.\n", effSLPercent, _Symbol);
+         else if(effSLPercent > REC_MAX_SL_PERCENT)
+            warnings += StringFormat("- Stop Loss (%.3f%%) is unusually wide. A single stop-out would cost a large share of the position's value.\n", effSLPercent);
 
-      if(InpTPPoints < InpSLPoints)
-         warnings += StringFormat("- Take Profit (%d) is smaller than Stop Loss (%d). You would need a win rate above 50%% just to break even.\n", InpTPPoints, InpSLPoints);
+         if(effTPPercent < effSLPercent)
+            warnings += StringFormat("- Take Profit (%.3f%%) is smaller than Stop Loss (%.3f%%). You would need a win rate above 50%% just to break even.\n", effTPPercent, effSLPercent);
 
-      // --- ATR multiplier / straddle distance ---
-      if(InpATRMultiplier < REC_MIN_ATR_MULT)
-         warnings += StringFormat("- ATR multiplier (%.2f) is low: stop orders sit very close to price and may trigger on normal noise, not real breakouts.\n", InpATRMultiplier);
-      else if(InpATRMultiplier > REC_MAX_ATR_MULT)
-         warnings += StringFormat("- ATR multiplier (%.2f) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", InpATRMultiplier);
+         if(effDistancePercent < REC_MIN_DISTANCE_PERCENT)
+            warnings += StringFormat("- Straddle distance (%.3f%%) is low: stop orders sit very close to price and may trigger on normal noise, not real breakouts.\n", effDistancePercent);
+         else if(effDistancePercent > REC_MAX_DISTANCE_PERCENT)
+            warnings += StringFormat("- Straddle distance (%.3f%%) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", effDistancePercent);
+      }
+      else
+      {
+         if(effSLPoints < REC_MIN_SL_POINTS)
+            warnings += StringFormat("- Stop Loss (%d pts) is very tight for %s. Normal spread/slippage could stop you out instantly.\n", effSLPoints, _Symbol);
+
+         if(effTPPoints < effSLPoints)
+            warnings += StringFormat("- Take Profit (%d) is smaller than Stop Loss (%d). You would need a win rate above 50%% just to break even.\n", effTPPoints, effSLPoints);
+
+         // --- ATR multiplier / straddle distance ---
+         if(effATRMultiplier < REC_MIN_ATR_MULT)
+            warnings += StringFormat("- ATR multiplier (%.2f) is low: stop orders sit very close to price and may trigger on normal noise, not real breakouts.\n", effATRMultiplier);
+         else if(effATRMultiplier > REC_MAX_ATR_MULT)
+            warnings += StringFormat("- ATR multiplier (%.2f) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", effATRMultiplier);
+      }
+
+      // --- Spread filter ---
+      if(effMaxSpreadPoints > REC_MAX_SPREAD_POINTS)
+      {
+         if(effCalcMode == CALC_MODE_PERCENT)
+            warnings += StringFormat("- Max spread filter (%d pts) is loose. Trades may be allowed during high-spread news spikes, which is dangerous with a tight TP of %.3f%%.\n", effMaxSpreadPoints, effTPPercent);
+         else
+            warnings += StringFormat("- Max spread filter (%d pts) is loose. Trades may be allowed during high-spread news spikes, which is dangerous with a tight TP of %d pts.\n", effMaxSpreadPoints, effTPPoints);
+      }
    }
 
    // --- Lot size ---
    if(InpLotSize > REC_MAX_LOT)
       warnings += StringFormat("- Lot size (%.2f) is larger than the recommended starting size (%.2f). On a small account this risks a big % drawdown per trade.\n", InpLotSize, REC_MAX_LOT);
-
-   // --- Spread filter ---
-   if(InpMaxSpreadPoints > REC_MAX_SPREAD_POINTS)
-      warnings += StringFormat("- Max spread filter (%d pts) is loose. Trades may be allowed during high-spread news spikes, which is dangerous with a tight TP of %d pts.\n", InpMaxSpreadPoints, InpTPPoints);
 
    // --- Daily loss limit ---
    if(!InpUseDailyLossLimit)
@@ -192,8 +298,10 @@ void RunInputSanityChecks()
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   ApplyPreset();
+
    atrHandle = INVALID_HANDLE;
-   if(InpCalcMode == CALC_MODE_FIXED_POINTS)
+   if(effCalcMode == CALC_MODE_FIXED_POINTS)
    {
       atrHandle = iATR(_Symbol, InpATRTimeframe, InpATRPeriod);
       if(atrHandle == INVALID_HANDLE)
@@ -304,18 +412,18 @@ double GetATR()
 //+------------------------------------------------------------------+
 double GetStraddleDistance()
 {
-   if(InpCalcMode == CALC_MODE_PERCENT)
+   if(effCalcMode == CALC_MODE_PERCENT)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       double midPrice = (ask + bid) / 2.0;
-      return midPrice * (InpDistancePercent / 100.0);
+      return midPrice * (effDistancePercent / 100.0);
    }
 
    double atr = GetATR();
    if(atr <= 0)
       return -1;
-   return atr * InpATRMultiplier;
+   return atr * effATRMultiplier;
 }
 
 //+------------------------------------------------------------------+
@@ -381,7 +489,7 @@ void DeleteAllOwnPendingOrders()
 bool SpreadOK()
 {
    long spreadPoints = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   return (spreadPoints <= InpMaxSpreadPoints);
+   return (spreadPoints <= effMaxSpreadPoints);
 }
 
 //+------------------------------------------------------------------+
@@ -410,30 +518,38 @@ void PlaceStraddle()
    double sellStopPrice = NormalizeDouble(bid - distance, digits);
 
    double buySL, buyTP, sellSL, sellTP;
-   if(InpCalcMode == CALC_MODE_PERCENT)
+   if(effCalcMode == CALC_MODE_PERCENT)
    {
-      buySL  = NormalizeDouble(buyStopPrice  * (1.0 - InpSLPercent / 100.0), digits);
-      buyTP  = NormalizeDouble(buyStopPrice  * (1.0 + InpTPPercent / 100.0), digits);
-      sellSL = NormalizeDouble(sellStopPrice * (1.0 + InpSLPercent / 100.0), digits);
-      sellTP = NormalizeDouble(sellStopPrice * (1.0 - InpTPPercent / 100.0), digits);
+      buySL  = NormalizeDouble(buyStopPrice  * (1.0 - effSLPercent / 100.0), digits);
+      buyTP  = NormalizeDouble(buyStopPrice  * (1.0 + effTPPercent / 100.0), digits);
+      sellSL = NormalizeDouble(sellStopPrice * (1.0 + effSLPercent / 100.0), digits);
+      sellTP = NormalizeDouble(sellStopPrice * (1.0 - effTPPercent / 100.0), digits);
    }
    else
    {
-      buySL  = NormalizeDouble(buyStopPrice  - InpSLPoints * point, digits);
-      buyTP  = NormalizeDouble(buyStopPrice  + InpTPPoints * point, digits);
-      sellSL = NormalizeDouble(sellStopPrice + InpSLPoints * point, digits);
-      sellTP = NormalizeDouble(sellStopPrice - InpTPPoints * point, digits);
+      buySL  = NormalizeDouble(buyStopPrice  - effSLPoints * point, digits);
+      buyTP  = NormalizeDouble(buyStopPrice  + effTPPoints * point, digits);
+      sellSL = NormalizeDouble(sellStopPrice + effSLPoints * point, digits);
+      sellTP = NormalizeDouble(sellStopPrice - effTPPoints * point, digits);
    }
 
    if(trade.BuyStop(InpLotSize, buyStopPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AutoPilotFX Buy"))
       buyStopTicket = trade.ResultOrder();
    else
+   {
       Print("BuyStop failed: ", trade.ResultRetcodeDescription());
+      if(trade.ResultRetcode() == TRADE_RETCODE_CLIENT_DISABLES_AT)
+         AlertAlgoTradingDisabled();
+   }
 
    if(trade.SellStop(InpLotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AutoPilotFX Sell"))
       sellStopTicket = trade.ResultOrder();
    else
+   {
       Print("SellStop failed: ", trade.ResultRetcodeDescription());
+      if(trade.ResultRetcode() == TRADE_RETCODE_CLIENT_DISABLES_AT)
+         AlertAlgoTradingDisabled();
+   }
 
    lastStraddleTime = TimeCurrent();
 }
@@ -448,11 +564,19 @@ void UpdateDashboard()
    double limitAmount = InpLimitIsPercent ? dayStartBalance * (InpDailyLossPercent / 100.0) : InpDailyLossAmount;
 
    string status = dailyLimitHit ? "HALTED - daily loss limit reached" : "Running";
-   string mode   = (InpCalcMode == CALC_MODE_PERCENT) ? "Percentage of Price" : "Fixed Points (ATR distance)";
+   string mode   = (effCalcMode == CALC_MODE_PERCENT) ? "Percentage of Price" : "Fixed Points (ATR distance)";
+   string preset;
+   switch(InpPreset)
+   {
+      case PRESET_FOREX:         preset = "Forex";           break;
+      case PRESET_CRYPTO:        preset = "Crypto";          break;
+      case PRESET_METALS_INDEX:  preset = "Metals/Index";    break;
+      default:                   preset = "Custom";          break;
+   }
 
    string txt = StringFormat(
-      "AutoPilotFX_EA | %s\nStatus: %s\nMode: %s\nDay-start balance: %.2f\nP/L today: %.2f\nDaily loss limit: %.2f (%s)",
-      _Symbol, status, mode, dayStartBalance, -lossSoFar,
+      "AutoPilotFX_EA | %s\nStatus: %s\nPreset: %s | Mode: %s\nDay-start balance: %.2f\nP/L today: %.2f\nDaily loss limit: %.2f (%s)",
+      _Symbol, status, preset, mode, dayStartBalance, -lossSoFar,
       limitAmount, InpUseDailyLossLimit ? "enabled" : "disabled");
 
    Comment(txt);

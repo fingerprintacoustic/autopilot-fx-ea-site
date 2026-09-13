@@ -153,7 +153,7 @@
           Download AutoPilotFX_EA.mq5
         </a>
         <a class="btn secondary" href="#install">Installation guide</a>
-        <span class="meta">v1.21 &middot; single file &middot; ~23&nbsp;KB</span>
+        <span class="meta">v1.30 &middot; single file &middot; ~23&nbsp;KB</span>
       </div>
     </div>
 
@@ -185,12 +185,16 @@
       <p class="sub">Safety and transparency are built in, not bolted on.</p>
       <div class="grid">
         <div class="card">
+          <h3><span class="dot"></span>One-click Quick Setup</h3>
+          <p>Not a tuning kind of person? Set <code>InpPreset</code> to <strong>Forex</strong>, <strong>Crypto</strong>, or <strong>Metals / Index</strong> and every SL, TP, distance, and spread-filter value is configured for you. Pick <strong>Custom</strong> to control every number by hand instead.</p>
+        </div>
+        <div class="card">
           <h3><span class="dot"></span>OCO straddle engine</h3>
           <p>Buy Stop above, Sell Stop below; first fill wins, the other order is pulled.</p>
         </div>
         <div class="card">
           <h3><span class="dot"></span>Fixed-points or %-of-price mode</h3>
-          <p>Calculate SL, TP, and straddle distance as raw points off an ATR reading (default), or as a percentage of price &mdash; useful for instruments where a fixed point count doesn't scale, like crypto pairs.</p>
+          <p>Under Custom mode, calculate SL, TP, and straddle distance as raw points off an ATR reading, or as a percentage of price &mdash; useful for instruments where a fixed point count doesn't scale, like crypto pairs.</p>
         </div>
         <div class="card">
           <h3><span class="dot"></span>Adjustable daily loss limit</h3>
@@ -224,16 +228,28 @@
         <li>Copy the file into <strong><code>MQL5/Experts/</code></strong>. If you're updating an existing copy, delete the old <code>.mq5</code>/<code>.ex5</code> first so MT5's Navigator doesn't end up listing two versions side by side.</li>
         <li>Back in MT5, right-click <strong>Expert Advisors</strong> in the Navigator and choose <strong>Refresh</strong>. Then right-click the EA itself &rarr; <strong>Modify</strong> &rarr; press <strong>F7</strong> in MetaEditor to compile (confirm "0 errors, 0 warnings").</li>
         <li>Drag <strong>AutoPilotFX_EA</strong> onto a chart (tested on EURUSD) and tick <strong>Allow Algo Trading</strong> in the dialog's Common tab. <strong>You also need the global &ldquo;Algo Trading&rdquo; button in MT5's top toolbar switched on</strong> &mdash; both have to be enabled, or every order gets silently rejected with &ldquo;auto trading disabled by client&rdquo;.</li>
-        <li>Review the <strong>Inputs</strong> tab, adjust to your account and risk, and confirm. <strong>Trading crypto, an index, or metals instead of a forex pair?</strong> Switch <code>InpCalcMode</code> to <em>Percentage of Price</em> and set <code>InpSLPercent</code>/<code>InpTPPercent</code>/<code>InpDistancePercent</code> &mdash; the default point-based values are sized for forex and will be far too tight on an instrument like BTCUSD.</li>
+        <li>In the <strong>Inputs</strong> tab, set <code>InpPreset</code> to match what you're trading &mdash; <strong>Forex</strong>, <strong>Crypto</strong>, or <strong>Metals / Index</strong> &mdash; and confirm. That's it; every SL/TP/distance/spread value is set for you. (Choose <strong>Custom</strong> only if you want to set each value yourself &mdash; see the Key Inputs table below.)</li>
       </ol>
     </section>
 
     <section id="inputs">
       <h2>Key inputs</h2>
-      <p class="sub">Full list is in the EA's Inputs tab; these are the ones that matter most.</p>
+      <p class="sub">Set <code>InpPreset</code> and you're done &mdash; the table below is for anyone who picks <strong>Custom</strong> and wants to set every value themselves.</p>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>Input</th><th>Default</th><th>Notes</th></tr></thead>
+          <thead><tr><th>Preset</th><th>Use for</th><th>What it sets</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Forex</strong></td><td>EURUSD, GBPUSD, AUDJPY, etc.</td><td>Fixed Points mode, ATR &times; 1.0 distance, 80/120pt SL/TP, 200pt max spread</td></tr>
+            <tr><td><strong>Crypto</strong></td><td>BTCUSD, ETHUSD, etc.</td><td>Percentage mode, 1.5%/2.5% SL/TP, 1.0% distance, 3000pt max spread</td></tr>
+            <tr><td><strong>Metals / Index</strong></td><td>XAUUSD, US30, etc.</td><td>Percentage mode, 0.5%/0.8% SL/TP, 0.3% distance, 500pt max spread</td></tr>
+            <tr><td><strong>Custom</strong> (default)</td><td>anything, hand-tuned</td><td>Uses every detailed input in the table below, unchanged</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="sub" style="margin-top:22px">These are sane starting points, not tuned or guaranteed settings &mdash; validate on a demo account first, same as any default.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Input <em style="font-weight:400">(Custom preset only, unless noted)</em></th><th>Default</th><th>Notes</th></tr></thead>
           <tbody>
             <tr><td><code>InpCalcMode</code></td><td>Fixed Points</td><td>Fixed Points (ATR distance) or Percentage of Price</td></tr>
             <tr><td><code>InpATRPeriod</code></td><td>14</td><td>ATR period &mdash; Fixed Points mode</td></tr>
@@ -282,7 +298,7 @@
       </svg>
       <span>Fingerprint Acoustic Trade</span>
     </div>
-    <p>AutoPilot FX EA v1.21 &middot; MQL5 Expert Advisor for MetaTrader 5.<br>
+    <p>AutoPilot FX EA v1.30 &middot; MQL5 Expert Advisor for MetaTrader 5.<br>
     &copy; <span id="yr">2026</span> Fingerprint Acoustic Trade. For educational use. Not financial advice.</p>
   </div>
 </footer>
