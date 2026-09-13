@@ -221,10 +221,10 @@
       <ol class="steps">
         <li><a href="AutoPilotFX_EA.mq5" download><strong>Download <code>AutoPilotFX_EA.mq5</code></strong></a> from the button above.</li>
         <li>In MetaTrader 5, open <strong>File &rarr; Open Data Folder</strong>.</li>
-        <li>Copy the file into <strong><code>MQL5/Experts/</code></strong>.</li>
-        <li>Back in MT5, right-click <strong>Expert Advisors</strong> in the Navigator and choose <strong>Refresh</strong> (or press <strong>F7</strong> in MetaEditor to compile).</li>
-        <li>Drag <strong>AutoPilotFX_EA</strong> onto a chart (tested on EURUSD) and tick <strong>Allow Algo Trading</strong>.</li>
-        <li>Review the <strong>Inputs</strong> tab, adjust to your account and risk, and confirm.</li>
+        <li>Copy the file into <strong><code>MQL5/Experts/</code></strong>. If you're updating an existing copy, delete the old <code>.mq5</code>/<code>.ex5</code> first so MT5's Navigator doesn't end up listing two versions side by side.</li>
+        <li>Back in MT5, right-click <strong>Expert Advisors</strong> in the Navigator and choose <strong>Refresh</strong>. Then right-click the EA itself &rarr; <strong>Modify</strong> &rarr; press <strong>F7</strong> in MetaEditor to compile (confirm "0 errors, 0 warnings").</li>
+        <li>Drag <strong>AutoPilotFX_EA</strong> onto a chart (tested on EURUSD) and tick <strong>Allow Algo Trading</strong> in the dialog's Common tab. <strong>You also need the global &ldquo;Algo Trading&rdquo; button in MT5's top toolbar switched on</strong> &mdash; both have to be enabled, or every order gets silently rejected with &ldquo;auto trading disabled by client&rdquo;.</li>
+        <li>Review the <strong>Inputs</strong> tab, adjust to your account and risk, and confirm. <strong>Trading crypto, an index, or metals instead of a forex pair?</strong> Switch <code>InpCalcMode</code> to <em>Percentage of Price</em> and set <code>InpSLPercent</code>/<code>InpTPPercent</code>/<code>InpDistancePercent</code> &mdash; the default point-based values are sized for forex and will be far too tight on an instrument like BTCUSD.</li>
       </ol>
     </section>
 
