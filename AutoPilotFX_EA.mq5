@@ -23,7 +23,7 @@
 //| is changed away from the recommended safe range.                  |
 //+------------------------------------------------------------------+
 #property copyright "Fingerprint Acoustic Trade"
-#property version   "1.20"
+#property version   "1.21"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -357,23 +357,22 @@ void FindPendingOrders(ulong &buyTicket, ulong &sellTicket)
 }
 
 //+------------------------------------------------------------------+
-//| Delete a pending order by ticket                                  |
-//+------------------------------------------------------------------+
-void DeleteOrderIfExists(ulong ticket)
-{
-   if(ticket == 0) return;
-   if(orderInfo.Select(ticket))
-      trade.OrderDelete(ticket);
-}
-
-//+------------------------------------------------------------------+
-//| Delete every pending order this EA owns on this symbol            |
+//| Delete every pending order this EA owns on this symbol - scans    |
+//| the full order list rather than two tracked tickets, so it        |
+//| self-heals if a past delete silently failed and left duplicates.  |
 //+------------------------------------------------------------------+
 void DeleteAllOwnPendingOrders()
 {
-   FindPendingOrders(buyStopTicket, sellStopTicket);
-   DeleteOrderIfExists(buyStopTicket);
-   DeleteOrderIfExists(sellStopTicket);
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == InpMagicNumber)
+            trade.OrderDelete(orderInfo.Ticket());
+      }
+   }
+   buyStopTicket  = 0;
+   sellStopTicket = 0;
 }
 
 //+------------------------------------------------------------------+
@@ -488,9 +487,7 @@ void OnTick()
    //    the opposite pending order (if somehow still alive) is cancelled.
    if(HasOpenPosition())
    {
-      FindPendingOrders(buyStopTicket, sellStopTicket);
-      if(buyStopTicket != 0)  DeleteOrderIfExists(buyStopTicket);
-      if(sellStopTicket != 0) DeleteOrderIfExists(sellStopTicket);
+      DeleteAllOwnPendingOrders();
       return;
    }
 
@@ -501,9 +498,9 @@ void OnTick()
 
    if(!haveBoth)
    {
-      // Clean up any orphaned single-sided order, then place a fresh straddle
-      DeleteOrderIfExists(buyStopTicket);
-      DeleteOrderIfExists(sellStopTicket);
+      // Clean up any orphaned single-sided order (or duplicates from a
+      // previously failed delete), then place a fresh straddle
+      DeleteAllOwnPendingOrders();
 
       if(!SpreadOK())
          return; // wait for spread to normalize
@@ -526,8 +523,7 @@ void OnTick()
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       if(MathAbs(buyPrice - ask) > distance * InpRepriceATRfactor)
       {
-         DeleteOrderIfExists(buyStopTicket);
-         DeleteOrderIfExists(sellStopTicket);
+         DeleteAllOwnPendingOrders();
          if(SpreadOK())
             PlaceStraddle();
       }
