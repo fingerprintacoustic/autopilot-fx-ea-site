@@ -153,21 +153,21 @@
           Download AutoPilotFX_EA.mq5
         </a>
         <a class="btn secondary" href="#install">Installation guide</a>
-        <span class="meta">v1.10 &middot; single file &middot; ~19&nbsp;KB</span>
+        <span class="meta">v1.20 &middot; single file &middot; ~23&nbsp;KB</span>
       </div>
     </div>
 
     <section id="how">
       <h2>What it does</h2>
-      <p class="sub">Stop-and-reverse breakout logic, driven by volatility rather than a fixed distance.</p>
+      <p class="sub">Stop-and-reverse breakout logic, driven by volatility &mdash; or by price percentage &mdash; rather than a fixed distance.</p>
       <div class="grid">
         <div class="card">
           <h3><span class="dot"></span>Volatility-sized straddle</h3>
-          <p>Distance from price for both pending orders is <code>ATR &times; multiplier</code>, so the bracket widens in fast markets and tightens in quiet ones.</p>
+          <p>Distance from price for both pending orders is <code>ATR &times; multiplier</code> by default, so the bracket widens in fast markets and tightens in quiet ones.</p>
         </div>
         <div class="card">
           <h3><span class="dot"></span>Breakout direction</h3>
-          <p>Whichever stop order triggers first rides the breakout. Each entry carries a tight, fixed Stop Loss and Take Profit in points.</p>
+          <p>Whichever stop order triggers first rides the breakout. Each entry carries a tight Stop Loss and Take Profit, in points or in % of price.</p>
         </div>
         <div class="card">
           <h3><span class="dot"></span>OCO behaviour</h3>
@@ -187,6 +187,10 @@
         <div class="card">
           <h3><span class="dot"></span>OCO straddle engine</h3>
           <p>Buy Stop above, Sell Stop below; first fill wins, the other order is pulled.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot"></span>Fixed-points or %-of-price mode</h3>
+          <p>Calculate SL, TP, and straddle distance as raw points off an ATR reading (default), or as a percentage of price &mdash; useful for instruments where a fixed point count doesn't scale, like crypto pairs.</p>
         </div>
         <div class="card">
           <h3><span class="dot"></span>Adjustable daily loss limit</h3>
@@ -231,11 +235,15 @@
         <table>
           <thead><tr><th>Input</th><th>Default</th><th>Notes</th></tr></thead>
           <tbody>
-            <tr><td><code>InpATRPeriod</code></td><td>14</td><td>ATR period</td></tr>
-            <tr><td><code>InpATRTimeframe</code></td><td>M15</td><td>Timeframe used for the ATR reading</td></tr>
-            <tr><td><code>InpATRMultiplier</code></td><td>1.0</td><td>Distance from price = ATR &times; this</td></tr>
-            <tr><td><code>InpSLPoints</code></td><td>80</td><td>Stop loss (points)</td></tr>
-            <tr><td><code>InpTPPoints</code></td><td>120</td><td>Take profit (points)</td></tr>
+            <tr><td><code>InpCalcMode</code></td><td>Fixed Points</td><td>Fixed Points (ATR distance) or Percentage of Price</td></tr>
+            <tr><td><code>InpATRPeriod</code></td><td>14</td><td>ATR period &mdash; Fixed Points mode</td></tr>
+            <tr><td><code>InpATRTimeframe</code></td><td>M15</td><td>Timeframe used for the ATR reading &mdash; Fixed Points mode</td></tr>
+            <tr><td><code>InpATRMultiplier</code></td><td>1.0</td><td>Distance from price = ATR &times; this &mdash; Fixed Points mode</td></tr>
+            <tr><td><code>InpSLPoints</code></td><td>80</td><td>Stop loss, in points &mdash; Fixed Points mode</td></tr>
+            <tr><td><code>InpTPPoints</code></td><td>120</td><td>Take profit, in points &mdash; Fixed Points mode</td></tr>
+            <tr><td><code>InpSLPercent</code></td><td>0.07</td><td>Stop loss, % of entry price &mdash; Percentage mode</td></tr>
+            <tr><td><code>InpTPPercent</code></td><td>0.11</td><td>Take profit, % of entry price &mdash; Percentage mode</td></tr>
+            <tr><td><code>InpDistancePercent</code></td><td>0.05</td><td>Straddle distance, % of current price &mdash; Percentage mode</td></tr>
             <tr><td><code>InpLotSize</code></td><td>0.01</td><td>Lot size</td></tr>
             <tr><td><code>InpMagicNumber</code></td><td>260826</td><td>Unique EA identifier</td></tr>
             <tr><td><code>InpMaxSpreadPoints</code></td><td>200</td><td>Max allowed spread (points)</td></tr>
@@ -274,7 +282,7 @@
       </svg>
       <span>Fingerprint Acoustic Trade</span>
     </div>
-    <p>AutoPilot FX EA v1.10 &middot; MQL5 Expert Advisor for MetaTrader 5.<br>
+    <p>AutoPilot FX EA v1.20 &middot; MQL5 Expert Advisor for MetaTrader 5.<br>
     &copy; <span id="yr">2026</span> Fingerprint Acoustic Trade. For educational use. Not financial advice.</p>
   </div>
 </footer>

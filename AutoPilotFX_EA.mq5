@@ -11,12 +11,19 @@
 //| Distance between price and the stop orders is calculated          |
 //| dynamically from ATR, so it widens/narrows with volatility.       |
 //|                                                                    |
+//| SL/TP and straddle distance can be calculated two ways, chosen    |
+//| via InpCalcMode:                                                  |
+//|   - Fixed Points: SL/TP in points, distance = ATR * multiplier    |
+//|     (the original behaviour, unchanged).                          |
+//|   - Percentage of Price: SL/TP and distance are each a % of the   |
+//|     current price instead of raw points/ATR.                      |
+//|                                                                    |
 //| Includes an adjustable daily loss limit, and an input-sanity      |
 //| check that warns (Alert + log) with reasoning any time a setting  |
 //| is changed away from the recommended safe range.                  |
 //+------------------------------------------------------------------+
 #property copyright "Fingerprint Acoustic Trade"
-#property version   "1.10"
+#property version   "1.20"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -27,15 +34,30 @@ CTrade         trade;
 CPositionInfo  positionInfo;
 COrderInfo     orderInfo;
 
+//--- SL/TP and straddle-distance calculation mode
+enum ENUM_CALC_MODE
+{
+   CALC_MODE_FIXED_POINTS,  // Fixed Points (SL/TP in points, ATR-based distance)
+   CALC_MODE_PERCENT        // Percentage of Price (SL/TP % of entry, % distance)
+};
+
 //--- Inputs (all adjustable in MT5 "Inputs" tab)
-input group    "=== ATR / Distance Settings ==="
+input group    "=== SL / TP / Distance Calculation Mode ==="
+input ENUM_CALC_MODE InpCalcMode = CALC_MODE_FIXED_POINTS; // Fixed Points vs Percentage of Price
+
+input group    "=== ATR / Distance Settings (used when Calc Mode = Fixed Points) ==="
 input int      InpATRPeriod        = 14;      // ATR Period
 input ENUM_TIMEFRAMES InpATRTimeframe = PERIOD_M15; // ATR Timeframe
 input double   InpATRMultiplier    = 1.0;     // Distance = ATR * this multiplier
 
-input group    "=== SL / TP Settings (tight, in points) ==="
+input group    "=== SL / TP Settings, in points (used when Calc Mode = Fixed Points) ==="
 input int      InpSLPoints         = 80;      // Stop Loss in points
 input int      InpTPPoints         = 120;     // Take Profit in points
+
+input group    "=== SL / TP / Distance Settings, in % of price (used when Calc Mode = Percentage) ==="
+input double   InpSLPercent        = 0.07;    // Stop Loss (% of entry price)
+input double   InpTPPercent        = 0.11;    // Take Profit (% of entry price)
+input double   InpDistancePercent  = 0.05;    // Straddle distance (% of current price)
 
 input group    "=== Trade Settings ==="
 input double   InpLotSize          = 0.01;    // Lot size
@@ -76,6 +98,10 @@ bool     dailyLimitHit    = false;
 #define REC_MAX_SPREAD_POINTS    50      // above this, spread cost eats tight TP quickly
 #define REC_MIN_ATR_MULT         0.5
 #define REC_MAX_ATR_MULT         3.0
+#define REC_MIN_SL_PERCENT       0.03    // % of price - below this, spread/slippage can eat it instantly
+#define REC_MAX_SL_PERCENT       1.0     // % of price - above this, a single stop-out costs a lot
+#define REC_MIN_DISTANCE_PERCENT 0.02    // % of price - below this, stop orders sit on top of the noise
+#define REC_MAX_DISTANCE_PERCENT 0.50    // % of price - above this, the bot may rarely get triggered
 
 //+------------------------------------------------------------------+
 //| Check every user-adjustable input against its recommended range   |
@@ -86,18 +112,36 @@ void RunInputSanityChecks()
 {
    string warnings = "";
 
-   // --- SL vs TP relationship ---
-   if(InpSLPoints < REC_MIN_SL_POINTS)
-      warnings += StringFormat("- Stop Loss (%d pts) is very tight for %s. Normal spread/slippage could stop you out instantly.\n", InpSLPoints, _Symbol);
+   // --- SL / TP / distance: checks depend on the active calculation mode ---
+   if(InpCalcMode == CALC_MODE_PERCENT)
+   {
+      if(InpSLPercent < REC_MIN_SL_PERCENT)
+         warnings += StringFormat("- Stop Loss (%.3f%%) is very tight for %s. Normal spread/slippage could stop you out instantly.\n", InpSLPercent, _Symbol);
+      else if(InpSLPercent > REC_MAX_SL_PERCENT)
+         warnings += StringFormat("- Stop Loss (%.3f%%) is unusually wide. A single stop-out would cost a large share of the position's value.\n", InpSLPercent);
 
-   if(InpTPPoints < InpSLPoints)
-      warnings += StringFormat("- Take Profit (%d) is smaller than Stop Loss (%d). You would need a win rate above 50%% just to break even.\n", InpTPPoints, InpSLPoints);
+      if(InpTPPercent < InpSLPercent)
+         warnings += StringFormat("- Take Profit (%.3f%%) is smaller than Stop Loss (%.3f%%). You would need a win rate above 50%% just to break even.\n", InpTPPercent, InpSLPercent);
 
-   // --- ATR multiplier / straddle distance ---
-   if(InpATRMultiplier < REC_MIN_ATR_MULT)
-      warnings += StringFormat("- ATR multiplier (%.2f) is low: stop orders sit very close to price and may trigger on normal noise, not real breakouts.\n", InpATRMultiplier);
-   else if(InpATRMultiplier > REC_MAX_ATR_MULT)
-      warnings += StringFormat("- ATR multiplier (%.2f) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", InpATRMultiplier);
+      if(InpDistancePercent < REC_MIN_DISTANCE_PERCENT)
+         warnings += StringFormat("- Straddle distance (%.3f%%) is low: stop orders sit very close to price and may trigger on normal noise, not real breakouts.\n", InpDistancePercent);
+      else if(InpDistancePercent > REC_MAX_DISTANCE_PERCENT)
+         warnings += StringFormat("- Straddle distance (%.3f%%) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", InpDistancePercent);
+   }
+   else
+   {
+      if(InpSLPoints < REC_MIN_SL_POINTS)
+         warnings += StringFormat("- Stop Loss (%d pts) is very tight for %s. Normal spread/slippage could stop you out instantly.\n", InpSLPoints, _Symbol);
+
+      if(InpTPPoints < InpSLPoints)
+         warnings += StringFormat("- Take Profit (%d) is smaller than Stop Loss (%d). You would need a win rate above 50%% just to break even.\n", InpTPPoints, InpSLPoints);
+
+      // --- ATR multiplier / straddle distance ---
+      if(InpATRMultiplier < REC_MIN_ATR_MULT)
+         warnings += StringFormat("- ATR multiplier (%.2f) is low: stop orders sit very close to price and may trigger on normal noise, not real breakouts.\n", InpATRMultiplier);
+      else if(InpATRMultiplier > REC_MAX_ATR_MULT)
+         warnings += StringFormat("- ATR multiplier (%.2f) is high: stop orders sit far from price, so the bot may rarely enter trades.\n", InpATRMultiplier);
+   }
 
    // --- Lot size ---
    if(InpLotSize > REC_MAX_LOT)
@@ -148,11 +192,15 @@ void RunInputSanityChecks()
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   atrHandle = iATR(_Symbol, InpATRTimeframe, InpATRPeriod);
-   if(atrHandle == INVALID_HANDLE)
+   atrHandle = INVALID_HANDLE;
+   if(InpCalcMode == CALC_MODE_FIXED_POINTS)
    {
-      Print("Failed to create ATR indicator handle. Error: ", GetLastError());
-      return(INIT_FAILED);
+      atrHandle = iATR(_Symbol, InpATRTimeframe, InpATRPeriod);
+      if(atrHandle == INVALID_HANDLE)
+      {
+         Print("Failed to create ATR indicator handle. Error: ", GetLastError());
+         return(INIT_FAILED);
+      }
    }
 
    trade.SetExpertMagicNumber(InpMagicNumber);
@@ -251,6 +299,26 @@ double GetATR()
 }
 
 //+------------------------------------------------------------------+
+//| Straddle distance (price units) for the active calc mode:         |
+//| ATR * multiplier (Fixed Points mode) or % of price (Percent mode) |
+//+------------------------------------------------------------------+
+double GetStraddleDistance()
+{
+   if(InpCalcMode == CALC_MODE_PERCENT)
+   {
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double midPrice = (ask + bid) / 2.0;
+      return midPrice * (InpDistancePercent / 100.0);
+   }
+
+   double atr = GetATR();
+   if(atr <= 0)
+      return -1;
+   return atr * InpATRMultiplier;
+}
+
+//+------------------------------------------------------------------+
 //| Count our own open positions on this symbol                       |
 //+------------------------------------------------------------------+
 bool HasOpenPosition()
@@ -322,10 +390,10 @@ bool SpreadOK()
 //+------------------------------------------------------------------+
 void PlaceStraddle()
 {
-   double atr = GetATR();
-   if(atr <= 0)
+   double distance = GetStraddleDistance();
+   if(distance <= 0)
    {
-      Print("Invalid ATR value, skipping straddle placement.");
+      Print("Invalid distance value, skipping straddle placement.");
       return;
    }
 
@@ -333,7 +401,6 @@ void PlaceStraddle()
    int    digits  = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    double ask     = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid     = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double distance = atr * InpATRMultiplier;
 
    int stopLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
    double minDistance = stopLevel * point;
@@ -343,10 +410,21 @@ void PlaceStraddle()
    double buyStopPrice  = NormalizeDouble(ask + distance, digits);
    double sellStopPrice = NormalizeDouble(bid - distance, digits);
 
-   double buySL  = NormalizeDouble(buyStopPrice - InpSLPoints * point, digits);
-   double buyTP  = NormalizeDouble(buyStopPrice + InpTPPoints * point, digits);
-   double sellSL = NormalizeDouble(sellStopPrice + InpSLPoints * point, digits);
-   double sellTP = NormalizeDouble(sellStopPrice - InpTPPoints * point, digits);
+   double buySL, buyTP, sellSL, sellTP;
+   if(InpCalcMode == CALC_MODE_PERCENT)
+   {
+      buySL  = NormalizeDouble(buyStopPrice  * (1.0 - InpSLPercent / 100.0), digits);
+      buyTP  = NormalizeDouble(buyStopPrice  * (1.0 + InpTPPercent / 100.0), digits);
+      sellSL = NormalizeDouble(sellStopPrice * (1.0 + InpSLPercent / 100.0), digits);
+      sellTP = NormalizeDouble(sellStopPrice * (1.0 - InpTPPercent / 100.0), digits);
+   }
+   else
+   {
+      buySL  = NormalizeDouble(buyStopPrice  - InpSLPoints * point, digits);
+      buyTP  = NormalizeDouble(buyStopPrice  + InpTPPoints * point, digits);
+      sellSL = NormalizeDouble(sellStopPrice + InpSLPoints * point, digits);
+      sellTP = NormalizeDouble(sellStopPrice - InpTPPoints * point, digits);
+   }
 
    if(trade.BuyStop(InpLotSize, buyStopPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AutoPilotFX Buy"))
       buyStopTicket = trade.ResultOrder();
@@ -371,10 +449,11 @@ void UpdateDashboard()
    double limitAmount = InpLimitIsPercent ? dayStartBalance * (InpDailyLossPercent / 100.0) : InpDailyLossAmount;
 
    string status = dailyLimitHit ? "HALTED - daily loss limit reached" : "Running";
+   string mode   = (InpCalcMode == CALC_MODE_PERCENT) ? "Percentage of Price" : "Fixed Points (ATR distance)";
 
    string txt = StringFormat(
-      "AutoPilotFX_EA | %s\nStatus: %s\nDay-start balance: %.2f\nP/L today: %.2f\nDaily loss limit: %.2f (%s)",
-      _Symbol, status, dayStartBalance, -lossSoFar,
+      "AutoPilotFX_EA | %s\nStatus: %s\nMode: %s\nDay-start balance: %.2f\nP/L today: %.2f\nDaily loss limit: %.2f (%s)",
+      _Symbol, status, mode, dayStartBalance, -lossSoFar,
       limitAmount, InpUseDailyLossLimit ? "enabled" : "disabled");
 
    Comment(txt);
@@ -438,14 +517,14 @@ void OnTick()
    if(TimeCurrent() - lastStraddleTime < InpRefreshSeconds)
       return;
 
-   double atr = GetATR();
-   if(atr <= 0) return;
+   double distance = GetStraddleDistance();
+   if(distance <= 0) return;
 
    if(orderInfo.Select(buyStopTicket))
    {
       double buyPrice = orderInfo.PriceOpen();
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      if(MathAbs(buyPrice - ask) > atr * InpRepriceATRfactor)
+      if(MathAbs(buyPrice - ask) > distance * InpRepriceATRfactor)
       {
          DeleteOrderIfExists(buyStopTicket);
          DeleteOrderIfExists(sellStopTicket);
