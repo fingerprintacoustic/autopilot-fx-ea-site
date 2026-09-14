@@ -30,12 +30,19 @@
 //| setting below is configured for you. Leave it on Custom to        |
 //| control every value yourself.                                     |
 //|                                                                    |
+//| Optional chop/trend filter (InpUseChopFilter, off by default):    |
+//| pauses placing a NEW straddle whenever live ADX reads below       |
+//| InpMinADX, i.e. the market looks like it's ranging rather than    |
+//| trending - the condition a breakout straddle tends to whipsaw     |
+//| and lose repeatedly in. It never touches a trade that's already   |
+//| open; it only delays arming a fresh, unfilled straddle.           |
+//|                                                                    |
 //| Includes an adjustable daily loss limit, and an input-sanity      |
 //| check that warns (Alert + log) with reasoning any time a setting  |
 //| is changed away from the recommended safe range.                  |
 //+------------------------------------------------------------------+
 #property copyright "Fingerprint Acoustic Trade"
-#property version   "1.40"
+#property version   "1.50"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -102,6 +109,12 @@ input group    "=== Straddle Refresh ==="
 input int      InpRefreshSeconds   = 30;      // Min seconds between re-placing a stale straddle
 input double   InpRepriceATRfactor = 0.5;     // Re-place straddle if price drifts this * ATR from pending price
 
+input group    "=== Chop / Trend Filter (optional - pauses new straddles in a non-trending market) ==="
+input bool     InpUseChopFilter    = false;   // Enable ADX trend filter
+input int      InpADXPeriod        = 14;      // ADX period
+input ENUM_TIMEFRAMES InpADXTimeframe = PERIOD_M15; // ADX timeframe
+input double   InpMinADX           = 20.0;    // Minimum ADX to allow a new straddle (below this = treated as ranging/chop)
+
 input group    "=== Daily Loss Limit ==="
 input bool     InpUseDailyLossLimit   = true;  // Enable daily loss limit
 input bool     InpLimitIsPercent      = true;  // true = % of day-start balance, false = fixed money amount
@@ -111,6 +124,7 @@ input bool     InpCloseOpenOnLimitHit = true;  // Also close any open position w
 
 //--- Globals
 int      atrHandle;
+int      adxHandle = INVALID_HANDLE;
 datetime lastStraddleTime = 0;
 ulong    buyStopTicket    = 0;
 ulong    sellStopTicket   = 0;
@@ -229,6 +243,8 @@ void AlertAlgoTradingDisabled()
 #define REC_MAX_SL_ATRMULT       2.0     // ATR multiple - above this, a single stop-out costs a lot
 #define REC_MIN_SPREAD_ATRFACTOR 0.05    // below this, the spread filter blocks almost every trade
 #define REC_MAX_SPREAD_ATRFACTOR 1.0     // above this, spread can eat most of a stop before it even fills
+#define REC_MIN_ADX_THRESHOLD    10.0    // below this, the chop filter barely filters anything
+#define REC_MAX_ADX_THRESHOLD    40.0    // above this, the chop filter may block almost all trading
 
 //+------------------------------------------------------------------+
 //| Check every user-adjustable input against its recommended range   |
@@ -310,6 +326,15 @@ void RunInputSanityChecks()
    if(InpLotSize > REC_MAX_LOT)
       warnings += StringFormat("- Lot size (%.2f) is larger than the recommended starting size (%.2f). On a small account this risks a big % drawdown per trade.\n", InpLotSize, REC_MAX_LOT);
 
+   // --- Chop/trend filter (not preset-controlled, so always checked) ---
+   if(InpUseChopFilter)
+   {
+      if(InpMinADX < REC_MIN_ADX_THRESHOLD)
+         warnings += StringFormat("- Chop filter's minimum ADX (%.1f) is very low: it will barely filter anything, so it may not help against whipsaws.\n", InpMinADX);
+      else if(InpMinADX > REC_MAX_ADX_THRESHOLD)
+         warnings += StringFormat("- Chop filter's minimum ADX (%.1f) is very high: it may block trading almost all the time, even in reasonably trending conditions.\n", InpMinADX);
+   }
+
    // --- Daily loss limit ---
    if(!InpUseDailyLossLimit)
    {
@@ -364,6 +389,14 @@ int OnInit()
       }
    }
 
+   adxHandle = INVALID_HANDLE;
+   if(InpUseChopFilter)
+   {
+      adxHandle = iADX(_Symbol, InpADXTimeframe, InpADXPeriod);
+      if(adxHandle == INVALID_HANDLE)
+         Print("Failed to create ADX indicator handle. Error: ", GetLastError(), " - chop filter will be treated as pass-through until this resolves.");
+   }
+
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFillingBySymbol(_Symbol);
@@ -382,6 +415,8 @@ void OnDeinit(const int reason)
 {
    if(atrHandle != INVALID_HANDLE)
       IndicatorRelease(atrHandle);
+   if(adxHandle != INVALID_HANDLE)
+      IndicatorRelease(adxHandle);
    Comment("");
 }
 
@@ -457,6 +492,40 @@ double GetATR()
    if(CopyBuffer(atrHandle, 0, 0, 1, atrBuffer) <= 0)
       return -1;
    return atrBuffer[0];
+}
+
+//+------------------------------------------------------------------+
+//| Get current ADX main-line value (trend strength, 0-100)           |
+//+------------------------------------------------------------------+
+double GetADX()
+{
+   double adxBuffer[];
+   ArraySetAsSeries(adxBuffer, true);
+   if(CopyBuffer(adxHandle, 0, 0, 1, adxBuffer) <= 0)
+      return -1;
+   return adxBuffer[0];
+}
+
+//+------------------------------------------------------------------+
+//| Chop/trend filter: true = OK to place a new straddle. Skips only  |
+//| when InpUseChopFilter is on and live ADX reads below InpMinADX -  |
+//| a low ADX means the market isn't trending, which is exactly when  |
+//| a breakout straddle tends to whipsaw and lose repeatedly. Any     |
+//| failure to read ADX (filter off, or handle/data unavailable) is   |
+//| treated as pass-through rather than blocking trading outright.    |
+//+------------------------------------------------------------------+
+bool ChopFilterOK()
+{
+   if(!InpUseChopFilter)
+      return true;
+   if(adxHandle == INVALID_HANDLE)
+      return true;
+
+   double adx = GetADX();
+   if(adx <= 0)
+      return true; // can't read it yet (e.g. not enough history) - don't block on that alone
+
+   return (adx >= InpMinADX);
 }
 
 //+------------------------------------------------------------------+
@@ -661,9 +730,19 @@ void UpdateDashboard()
       default:                   preset = "Custom";          break;
    }
 
+   string chopLine = "";
+   if(InpUseChopFilter)
+   {
+      double adx = (adxHandle != INVALID_HANDLE) ? GetADX() : -1;
+      string chopState = (adx <= 0) ? "reading..." : (adx >= InpMinADX ? "trending - OK" : "ranging - paused");
+      chopLine = (adx <= 0)
+         ? StringFormat("\nChop filter: %s (min ADX %.1f)", chopState, InpMinADX)
+         : StringFormat("\nChop filter: ADX %.1f, min %.1f - %s", adx, InpMinADX, chopState);
+   }
+
    string txt = StringFormat(
-      "AutoPilotFX_EA | %s\nStatus: %s\nPreset: %s | Mode: %s\nDay-start balance: %.2f\nP/L today: %.2f\nDaily loss limit: %.2f (%s)",
-      _Symbol, status, preset, mode, dayStartBalance, -lossSoFar,
+      "AutoPilotFX_EA | %s\nStatus: %s\nPreset: %s | Mode: %s%s\nDay-start balance: %.2f\nP/L today: %.2f\nDaily loss limit: %.2f (%s)",
+      _Symbol, status, preset, mode, chopLine, dayStartBalance, -lossSoFar,
       limitAmount, InpUseDailyLossLimit ? "enabled" : "disabled");
 
    Comment(txt);
@@ -716,6 +795,9 @@ void OnTick()
       if(!SpreadOK())
          return; // wait for spread to normalize
 
+      if(!ChopFilterOK())
+         return; // market not trending enough right now - wait rather than risk a whipsaw
+
       PlaceStraddle();
       return;
    }
@@ -735,7 +817,7 @@ void OnTick()
       if(MathAbs(buyPrice - ask) > distance * InpRepriceATRfactor)
       {
          DeleteAllOwnPendingOrders();
-         if(SpreadOK())
+         if(SpreadOK() && ChopFilterOK())
             PlaceStraddle();
       }
    }
