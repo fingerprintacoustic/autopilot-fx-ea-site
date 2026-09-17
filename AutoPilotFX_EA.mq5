@@ -42,7 +42,7 @@
 //| is changed away from the recommended safe range.                  |
 //+------------------------------------------------------------------+
 #property copyright "Fingerprint Acoustic Trade"
-#property version   "1.50"
+#property version   "1.51"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -134,6 +134,12 @@ datetime currentDay       = 0;
 bool     dailyLimitHit    = false;
 
 datetime lastAlgoDisabledAlertTime = 0;
+
+//--- How many times the current straddle has been re-centered without
+//    ever catching a fill. Resets to 0 the moment a position opens.
+//    Shown on the dashboard so "is it chasing price?" is a visible
+//    number instead of a guess.
+int      reCenterCount = 0;
 
 //--- Effective settings actually used by the EA: either the raw inputs
 //    (Quick Setup = Custom) or values overridden by the chosen preset.
@@ -741,8 +747,8 @@ void UpdateDashboard()
    }
 
    string txt = StringFormat(
-      "AutoPilotFX_EA | %s\nStatus: %s\nPreset: %s | Mode: %s%s\nDay-start balance: %.2f\nP/L today: %.2f\nDaily loss limit: %.2f (%s)",
-      _Symbol, status, preset, mode, chopLine, dayStartBalance, -lossSoFar,
+      "AutoPilotFX_EA | %s\nStatus: %s\nPreset: %s | Mode: %s%s\nRe-centers since last fill: %d\nDay-start balance: %.2f\nP/L today: %.2f\nDaily loss limit: %.2f (%s)",
+      _Symbol, status, preset, mode, chopLine, reCenterCount, dayStartBalance, -lossSoFar,
       limitAmount, InpUseDailyLossLimit ? "enabled" : "disabled");
 
    Comment(txt);
@@ -777,6 +783,7 @@ void OnTick()
    //    the opposite pending order (if somehow still alive) is cancelled.
    if(HasOpenPosition())
    {
+      reCenterCount = 0; // a fill happened - start the count fresh for the next straddle
       DeleteAllOwnPendingOrders();
       return;
    }
@@ -816,6 +823,9 @@ void OnTick()
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       if(MathAbs(buyPrice - ask) > distance * InpRepriceATRfactor)
       {
+         reCenterCount++;
+         Print(StringFormat("AutoPilotFX_EA: Re-centering straddle on %s - price drifted %.5f from the pending buy price (%.5f). Re-center #%d since the last fill.",
+               _Symbol, MathAbs(buyPrice - ask), buyPrice, reCenterCount));
          DeleteAllOwnPendingOrders();
          if(SpreadOK() && ChopFilterOK())
             PlaceStraddle();
